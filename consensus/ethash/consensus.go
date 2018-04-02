@@ -288,15 +288,16 @@ func (ethash *Ethash) verifyHeader(chain consensus.ChainReader, header, parent *
 // given the parent block's time and difficulty.
 // TODO (karalabe): Move the chain maker into this package and make this private!
 func CalcDifficulty(config *params.ChainConfig, time uint64, parent *types.Header) *big.Int {
-	next := new(big.Int).Add(parent.Number, big1)
-	switch {
-	case config.IsByzantium(next):
-		return calcDifficultyByzantium(time, parent)
-	case config.IsHomestead(next):
-		return calcDifficultyHomestead(time, parent)
-	default:
-		return calcDifficultyFrontier(time, parent)
-	}
+	return calcDifficultyPowercoin(time, parent)
+	//next := new(big.Int).Add(parent.Number, big1)
+	//switch {
+	//case config.IsByzantium(next):
+	//	return calcDifficultyByzantium(time, parent)
+	//case config.IsHomestead(next):
+	//	return calcDifficultyHomestead(time, parent)
+	//default:
+	//	return calcDifficultyFrontier(time, parent)
+	//}
 }
 
 // Some weird constants to avoid constant memory allocs for them.
@@ -309,6 +310,43 @@ var (
 	bigMinus99    = big.NewInt(-99)
 	big2999999    = big.NewInt(2999999)
 )
+
+// calcDifficultyHomestead is the difficulty adjustment algorithm. It returns
+// the difficulty that a new block should have when created at time given the
+// parent block's time and difficulty. The calculation uses the Homestead rules.
+func calcDifficultyPowercoin(time uint64, parent *types.Header) *big.Int {
+        // https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.mediawiki
+        // algorithm:
+        // diff = (parent_diff +
+        //         (parent_diff / 2048 * max(1 - (block_timestamp - parent_timestamp) // 1, -99)))
+
+        bigTime := new(big.Int).SetUint64(time)
+        bigParentTime := new(big.Int).Set(parent.Time)
+
+        // holds intermediate values to make the algo easier to read & audit
+        x := new(big.Int)
+        y := new(big.Int)
+
+        // 1 - (block_timestamp - parent_timestamp) // 10
+        x.Sub(bigTime, bigParentTime)
+        //x.Div(x, big10)
+        x.Sub(big1, x)
+
+        // max(1 - (block_timestamp - parent_timestamp) // 10, -99)
+        if x.Cmp(bigMinus99) < 0 {
+                x.Set(bigMinus99)
+        }
+        // (parent_diff + parent_diff // 2048 * max(1 - (block_timestamp - parent_timestamp) // 10, -99))
+        y.Div(parent.Difficulty, params.DifficultyBoundDivisor)
+        x.Mul(y, x)
+        x.Add(parent.Difficulty, x)
+
+        // minimum difficulty can ever be (before exponential factor)
+        if x.Cmp(params.MinimumDifficulty) < 0 {
+                x.Set(params.MinimumDifficulty)
+        }
+        return x
+}
 
 // calcDifficultyByzantium is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time given the
